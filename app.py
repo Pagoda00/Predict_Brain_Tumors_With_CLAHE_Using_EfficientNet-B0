@@ -29,7 +29,7 @@ def load_model():
         # PENTING: Ganti dengan ID file Google Drive Anda
         # Contoh link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
         # ID file adalah bagian yang ada di antara /d/ dan /view
-        file_id = "GANTI_DENGAN_ID_FILE_GOOGLE_DRIVE_ANDA"
+        file_id = "1-q0H1ncvzAJt0DaEYz5yz0BOv4axQoFe"
 
         try:
             gdown.download(id=file_id, output=model_path, quiet=False)
