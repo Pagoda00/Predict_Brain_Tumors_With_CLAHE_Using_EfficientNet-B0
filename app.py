@@ -3,6 +3,8 @@ import tensorflow as tf
 import numpy as np
 import cv2
 from PIL import Image
+import os
+import gdown
 
 # --- Konfigurasi Halaman ---
 st.set_page_config(
@@ -12,35 +14,92 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
-# --- Fungsi untuk Memuat Model (dengan cache agar efisien) ---
+# --- Fungsi untuk Memuat Model (dengan cache dan unduhan) ---
 @st.cache_resource
 def load_model():
-    """Memuat model Keras yang sudah dilatih."""
+    """
+    Memeriksa, mengunduh jika perlu, dan memuat model Keras yang sudah dilatih.
+    """
+    model_path = 'brain-final.keras'
+
+    # Cek jika file model belum ada di direktori
+    if not os.path.exists(model_path):
+        st.info("Model tidak ditemukan. Mengunduh dari Google Drive... (mungkin butuh beberapa saat)")
+
+        # PENTING: Ganti dengan ID file Google Drive Anda
+        # Contoh link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+        # ID file adalah bagian yang ada di antara /d/ dan /view
+        file_id = "GANTI_DENGAN_ID_FILE_GOOGLE_DRIVE_ANDA"
+
+        try:
+            gdown.download(id=file_id, output=model_path, quiet=False)
+            st.success("Model berhasil diunduh!")
+        except Exception as e:
+            st.error(f"Gagal mengunduh model: {e}")
+            return None
+
+    # Muat model setelah ada
     try:
-        model = tf.keras.models.load_model('brain-final.keras') # Ganti jika nama file model Anda berbeda
+        model = tf.keras.models.load_model(model_path)
         return model
     except Exception as e:
-        st.error(f"Error saat memuat model: {e}")
+        st.error(f"Error saat memuat model dari file lokal: {e}")
         return None
 
 # --- Fungsi untuk Prapemrosesan Gambar ---
-def preprocess_image(image):
+def resize_with_padding(image, target_size=224):
     """
-    Melakukan prapemrosesan pada gambar yang diunggah agar sesuai dengan input model.
+    Mengubah ukuran gambar dengan padding untuk menjaga rasio aspek.
     """
-    # Mengubah gambar PIL ke format array NumPy yang bisa dibaca OpenCV
-    image = np.array(image)
+    h, w = image.shape[:2]
+    target_h, target_w = target_size, target_size
 
-    # Konversi dari RGB (PIL) ke BGR (OpenCV)
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    # Tentukan skala dan ukuran baru
+    scale = min(target_w / w, target_h / h)
+    new_w, new_h = int(w * scale), int(h * scale)
 
-    # Ubah ukuran gambar ke 224x224 (sesuai input model EfficientNetB0)
-    image = cv2.resize(image, (224, 224))
+    resized_image = cv2.resize(image, (new_w, new_h))
 
-    # Tambahkan dimensi batch (model mengharapkan input shape: [1, 224, 224, 3])
-    image = np.expand_dims(image, axis=0)
+    # Buat kanvas hitam dan letakkan gambar di tengah
+    padded_image = np.zeros((target_h, target_w), dtype=np.uint8)
+    top = (target_h - new_h) // 2
+    left = (target_w - new_w) // 2
+    padded_image[top:top + new_h, left:left + new_w] = resized_image
 
-    return image
+    return padded_image
+
+def preprocess_image_improved(image_array, image_size=224):
+    """
+    Pipeline pre-processing yang disempurnakan.
+    Input adalah NumPy array.
+    """
+    # Step 1: Grayscale Conversion
+    if len(image_array.shape) > 2 and image_array.shape[2] == 3:
+        gray_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
+    else:
+        gray_image = image_array
+
+    # Step 2: Resizing with Padding
+    padded_image = resize_with_padding(gray_image, image_size)
+
+    # Step 3: CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe_image = clahe.apply(padded_image)
+
+    # Step 4: Denoising
+    denoised_image = cv2.fastNlMeansDenoising(clahe_image, None, h=10, templateWindowSize=7, searchWindowSize=21)
+
+    # Step 5: Unsharp Mask
+    blurred = cv2.GaussianBlur(denoised_image, (5, 5), 0)
+    unsharp_image = cv2.addWeighted(denoised_image, 1.5, blurred, -0.5, 0)
+
+    # Step 6: Konversi ke 3 Channel
+    three_channel_image = cv2.cvtColor(unsharp_image, cv2.COLOR_GRAY2RGB)
+
+    # Step 7: Tambahkan dimensi batch
+    final_image = np.expand_dims(three_channel_image, axis=0)
+
+    return final_image
 
 # --- Aplikasi Utama Streamlit ---
 
@@ -69,8 +128,11 @@ if uploaded_file is not None and model is not None:
     st.write("")
     st.write("Memproses dan memprediksi...")
 
+    # Konversi gambar PIL ke NumPy array sebelum diproses
+    image_np = np.array(image)
+
     # Prapemrosesan gambar
-    processed_image = preprocess_image(image)
+    processed_image = preprocess_image_improved(image_np)
 
     # Lakukan prediksi
     prediction = model.predict(processed_image)
@@ -86,3 +148,4 @@ if uploaded_file is not None and model is not None:
     st.write("Probabilitas untuk setiap kelas:")
     for i, label in enumerate(class_labels):
         st.write(f"- {label}: {prediction[0][i]*100:.2f}%")
+
