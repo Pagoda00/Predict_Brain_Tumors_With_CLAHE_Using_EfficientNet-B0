@@ -6,6 +6,8 @@ from PIL import Image
 import os
 import gdown
 import pandas as pd
+import matplotlib.pyplot as plt
+
 # --- Konfigurasi Halaman ---
 st.set_page_config(
     page_title="Deteksi Tumor Otak",
@@ -22,14 +24,14 @@ def load_model():
     """
     model_path = 'brain-final.keras'
     if not os.path.exists(model_path):
-        with st.spinner("Mohon tunggu, sedang mengunduh model... Ini hanya dilakukan sekali."):
+        with st.spinner("Mohon tunggu, sedang mempersiapkan model 👌..."):
             # Ganti dengan ID file Google Drive Anda
             file_id = "1-q0H1ncvzAJt0DaEYz5yz0BOv4axQoFe"
             try:
                 gdown.download(id=file_id, output=model_path, quiet=False)
-                st.success("Model berhasil diunduh!")
+                st.success("Model berhasil diunduh! 😉")
             except Exception as e:
-                st.error(f"Gagal mengunduh model: {e}")
+                st.error(f"Gagal mengunduh model 🥲: {e}")
                 return None
     try:
         model = tf.keras.models.load_model(model_path)
@@ -107,8 +109,13 @@ st.markdown(
     🤓**Author:** Muhammad Kaisar Firdaus  
     🏢*Program Studi Sains Data, Fakultas Sains, Institut Teknologi Sumatera*
     
-    Aplikasi ini menggunakan model *Convolutional Neural Network* dengan *transfer learning* **EfficientNet-B0**
-    dan menerapkan pra-pemrosesan citra, yaitu *Clip Limit Adaptive Histogram Equalization* (CLAHE) untuk meningkatkan akurasi deteksi.
+    Website ini merupakan hasil penelitian skripsi S1 oleh author, dan merupakan karya sendiri tanpa campur tangan pihak lain.
+    """
+)
+st.markdown(
+    """
+    Website ini menggunakan model *Convolutional Neural Network* dengan *transfer learning* **EfficientNet-B0**
+    dan menerapkan pra-pemrosesan citra, yaitu *Clip Limit Adaptive Histogram Equalization* (CLAHE).
     """
 )
 st.markdown("---")
@@ -151,15 +158,39 @@ if uploaded_file is not None and model is not None:
 
     with col_res2:
         st.markdown("##### Distribusi Probabilitas:")
-        # Membuat DataFrame untuk grafik
         prob_df = pd.DataFrame({
             'Kelas': class_labels,
             'Probabilitas': prediction[0] * 100
         })
-        st.bar_chart(prob_df.set_index('Kelas'))
+
+        # --- MENGGUNAKAN MATPLOTLIB UNTUK KUSTOMISASI GRAFIK ---
+        fig, ax = plt.subplots(figsize=(7, 4))
+        
+        # Membuat bar chart horizontal agar label selalu terbaca
+        bars = ax.barh(prob_df['Kelas'], prob_df['Probabilitas'], color='steelblue')
+        
+        # Menambahkan label persentase di ujung setiap bar
+        ax.bar_label(bars, fmt='%.2f%%', padding=3, color='gray', fontsize=10)
+
+        # Kustomisasi tampilan plot
+        ax.set_xlim(0, 115)
+        ax.set_xlabel('Probabilitas (%)', fontsize=12)
+        ax.tick_params(axis='y', length=0)
+        ax.tick_params(axis='x', labelsize=10)
+        
+        # Sembunyikan bingkai dan judul yang tidak perlu
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_color('#DDDDDD')
+        ax.grid(axis='x', linestyle='--', alpha=0.7)
+        ax.set_axisbelow(True)
+
+        fig.tight_layout()
+        st.pyplot(fig)
     
     with st.expander("Lihat Detail Langkah Pra-pemrosesan"):
-        st.write("Berikut adalah visualisasi dari setiap langkah pra-pemrosesan yang diterapkan pada gambar:")
+        st.write("Berikut adalah visualisasi dari setiap langkah pra-pemrosesan CLAHE yang diterapkan pada gambar:")
         
         cols = st.columns(len(processing_steps))
         for idx, (step_name, step_image) in enumerate(processing_steps.items()):
@@ -167,4 +198,4 @@ if uploaded_file is not None and model is not None:
                 st.image(step_image, caption=step_name, use_column_width=True)
 
 else:
-    st.info("Menunggu gambar MRI untuk diunggah...")
+    st.info("Menunggu gambar MRI untuk diunggah...⏱️")
