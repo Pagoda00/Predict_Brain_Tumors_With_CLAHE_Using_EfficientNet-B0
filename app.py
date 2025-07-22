@@ -5,7 +5,7 @@ import cv2
 from PIL import Image
 import os
 import gdown
-
+import pandas as pd
 # --- Konfigurasi Halaman ---
 st.set_page_config(
     page_title="Deteksi Tumor Otak",
