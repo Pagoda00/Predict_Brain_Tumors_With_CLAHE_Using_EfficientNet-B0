@@ -10,35 +10,27 @@ import gdown
 st.set_page_config(
     page_title="Deteksi Tumor Otak",
     page_icon="🧠",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="auto",
 )
 
-# --- Fungsi untuk Memuat Model (dengan cache dan unduhan) ---
+# --- Fungsi Cache untuk Memuat Model ---
 @st.cache_resource
 def load_model():
     """
-    Memeriksa, mengunduh jika perlu, dan memuat model Keras yang sudah dilatih.
+    Memeriksa, mengunduh jika perlu, dan memuat model Keras.
     """
     model_path = 'brain-final.keras'
-
-    # Cek jika file model belum ada di direktori
     if not os.path.exists(model_path):
-        st.info("Model tidak ditemukan. Mengunduh dari Google Drive... (mungkin butuh beberapa saat)")
-
-        # PENTING: Ganti dengan ID file Google Drive Anda
-        # Contoh link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-        # ID file adalah bagian yang ada di antara /d/ dan /view
-        file_id = "1-q0H1ncvzAJt0DaEYz5yz0BOv4axQoFe"
-
-        try:
-            gdown.download(id=file_id, output=model_path, quiet=False)
-            st.success("Model berhasil diunduh!")
-        except Exception as e:
-            st.error(f"Gagal mengunduh model: {e}")
-            return None
-
-    # Muat model setelah ada
+        with st.spinner("Mohon tunggu, sedang mengunduh model... Ini hanya dilakukan sekali."):
+            # Ganti dengan ID file Google Drive Anda
+            file_id = "1-q0H1ncvzAJt0DaEYz5yz0BOv4axQoFe"
+            try:
+                gdown.download(id=file_id, output=model_path, quiet=False)
+                st.success("Model berhasil diunduh!")
+            except Exception as e:
+                st.error(f"Gagal mengunduh model: {e}")
+                return None
     try:
         model = tf.keras.models.load_model(model_path)
         return model
@@ -46,106 +38,133 @@ def load_model():
         st.error(f"Error saat memuat model dari file lokal: {e}")
         return None
 
-# --- Fungsi untuk Prapemrosesan Gambar ---
+# --- Fungsi Pra-pemrosesan Gambar ---
 def resize_with_padding(image, target_size=224):
-    """
-    Mengubah ukuran gambar dengan padding untuk menjaga rasio aspek.
-    """
     h, w = image.shape[:2]
-    target_h, target_w = target_size, target_size
-
-    # Tentukan skala dan ukuran baru
-    scale = min(target_w / w, target_h / h)
+    scale = min(target_size / w, target_size / h)
     new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(image, (new_w, new_h))
+    padded = np.full((target_size, target_size), 0, dtype=np.uint8)
+    top = (target_size - new_h) // 2
+    left = (target_size - new_w) // 2
+    padded[top:top + new_h, left:left + new_w] = resized
+    return padded
 
-    resized_image = cv2.resize(image, (new_w, new_h))
-
-    # Buat kanvas hitam dan letakkan gambar di tengah
-    padded_image = np.zeros((target_h, target_w), dtype=np.uint8)
-    top = (target_h - new_h) // 2
-    left = (target_w - new_w) // 2
-    padded_image[top:top + new_h, left:left + new_w] = resized_image
-
-    return padded_image
-
-def preprocess_image_improved(image_array, image_size=224):
+def preprocess_for_prediction(image_array, image_size=224):
     """
-    Pipeline pre-processing yang disempurnakan.
-    Input adalah NumPy array.
+    Pipeline pra-pemrosesan lengkap.
+    Mengembalikan gambar akhir untuk model dan dictionary berisi langkah-langkah pra-pemrosesan.
     """
-    # Step 1: Grayscale Conversion
+    steps = {}
+    
+    # 1. Grayscale
     if len(image_array.shape) > 2 and image_array.shape[2] == 3:
         gray_image = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
     else:
         gray_image = image_array
+    steps['Grayscale'] = gray_image
 
-    # Step 2: Resizing with Padding
+    # 2. Resizing with Padding
     padded_image = resize_with_padding(gray_image, image_size)
+    steps['Resized & Padded'] = padded_image
 
-    # Step 3: CLAHE
+    # 3. CLAHE
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     clahe_image = clahe.apply(padded_image)
+    steps['CLAHE'] = clahe_image
 
-    # Step 4: Denoising
+    # 4. Denoising
     denoised_image = cv2.fastNlMeansDenoising(clahe_image, None, h=10, templateWindowSize=7, searchWindowSize=21)
+    steps['Denoised'] = denoised_image
 
-    # Step 5: Unsharp Mask
+    # 5. Unsharp Mask
     blurred = cv2.GaussianBlur(denoised_image, (5, 5), 0)
     unsharp_image = cv2.addWeighted(denoised_image, 1.5, blurred, -0.5, 0)
+    steps['Unsharp Masked'] = unsharp_image
 
-    # Step 6: Konversi ke 3 Channel
+    # 6. Konversi ke 3 Channel untuk model
     three_channel_image = cv2.cvtColor(unsharp_image, cv2.COLOR_GRAY2RGB)
 
-    # Step 7: Tambahkan dimensi batch
+    # 7. Tambahkan dimensi batch
     final_image = np.expand_dims(three_channel_image, axis=0)
 
-    return final_image
+    return final_image, steps
 
-# --- Aplikasi Utama Streamlit ---
+# --- Informasi Tumor ---
+TUMOR_INFO = {
+    "Glioma": "Glioma adalah jenis tumor yang tumbuh dari sel glial di otak. Tumor ini bisa bersifat jinak atau ganas dan merupakan salah satu tumor otak primer yang paling umum.",
+    "Meningioma": "Meningioma adalah tumor yang terbentuk pada meninges, yaitu selaput yang melindungi otak dan sumsum tulang belakang. Sebagian besar meningioma bersifat jinak (non-kanker).",
+    "Pituitary": "Tumor hipofisis (pituitary) adalah pertumbuhan abnormal yang berkembang di kelenjar hipofisis. Sebagian besar tumor ini jinak dan dapat menyebabkan masalah hormonal.",
+    "Tanpa Tumor": "Hasil pemindaian tidak menunjukkan adanya tanda-tanda tumor otak yang jelas. Namun, konsultasi dengan ahli medis tetap disarankan untuk konfirmasi."
+}
 
-# Muat model
+# --- UI Aplikasi Utama ---
 model = load_model()
 
-# Tampilkan judul dan deskripsi
 st.title("🧠 Deteksi Tumor Otak Berbasis MRI")
-st.write(
-    "Aplikasi ini menggunakan model Deep Learning (EfficientNet-B0) untuk "
-    "memprediksi jenis tumor otak dari gambar MRI. Unggah gambar MRI untuk memulai."
+st.markdown(
+    """
+    **Author:** Muhammad Kaisar Firdaus  
+    *Program Studi Sains Data, Fakultas Sains, Institut Teknologi Sumatera*
+    
+    Aplikasi ini menggunakan model *Convolutional Neural Network* dengan *transfer learning* **EfficientNet-B0**
+    dan menerapkan pra-pemrosesan citra, yaitu *Clip Limit Adaptive Histogram Equalization* (CLAHE) untuk meningkatkan akurasi deteksi.
+    """
 )
+st.markdown("---")
 
-# Definisikan label kelas sesuai urutan pada saat training
 class_labels = ['Glioma', 'Meningioma', 'Tanpa Tumor', 'Pituitary']
 
-# Komponen untuk mengunggah file gambar
 uploaded_file = st.file_uploader(
-    "Pilih gambar MRI...", type=["jpg", "jpeg", "png"]
+    "Silakan Unggah Gambar Scan MRI (format .jpg, .jpeg, atau .png)",
+    type=["jpg", "jpeg", "png"]
 )
 
 if uploaded_file is not None and model is not None:
-    # Tampilkan gambar yang diunggah
     image = Image.open(uploaded_file)
-    st.image(image, caption='Gambar yang Diunggah.', use_column_width=True)
-    st.write("")
-    st.write("Memproses dan memprediksi...")
-
-    # Konversi gambar PIL ke NumPy array sebelum diproses
     image_np = np.array(image)
 
-    # Prapemrosesan gambar
-    processed_image = preprocess_image_improved(image_np)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(image, caption='Gambar MRI Asli', use_column_width=True)
 
-    # Lakukan prediksi
-    prediction = model.predict(processed_image)
-    predicted_class_index = np.argmax(prediction)
-    predicted_class_label = class_labels[predicted_class_index]
-    confidence = np.max(prediction) * 100
+    with st.spinner("Gambar sedang diproses dan diprediksi..."):
+        # Pra-pemrosesan dan prediksi
+        processed_image_for_model, processing_steps = preprocess_for_prediction(image_np)
+        prediction = model.predict(processed_image_for_model)
+        predicted_class_index = np.argmax(prediction)
+        predicted_class_label = class_labels[predicted_class_index]
+        confidence = np.max(prediction) * 100
 
-    # Tampilkan hasil prediksi
-    st.success(f"**Hasil Prediksi:** {predicted_class_label}")
-    st.info(f"**Tingkat Keyakinan:** {confidence:.2f}%")
+    with col2:
+        st.image(processing_steps['Unsharp Masked'], caption='Gambar Setelah Pra-pemrosesan', use_column_width=True)
 
-    # Tambahan: Tampilkan probabilitas untuk setiap kelas
-    st.write("Probabilitas untuk setiap kelas:")
-    for i, label in enumerate(class_labels):
-        st.write(f"- {label}: {prediction[0][i]*100:.2f}%")
+    st.markdown("---")
+    st.header("Hasil Prediksi")
 
+    col_res1, col_res2 = st.columns(2)
+    with col_res1:
+        st.success(f"**Jenis Terdeteksi:** {predicted_class_label}")
+        st.info(f"**Tingkat Keyakinan:** {confidence:.2f}%")
+        st.markdown("##### Deskripsi:")
+        st.write(TUMOR_INFO[predicted_class_label])
+
+    with col_res2:
+        st.markdown("##### Distribusi Probabilitas:")
+        # Membuat DataFrame untuk grafik
+        prob_df = pd.DataFrame({
+            'Kelas': class_labels,
+            'Probabilitas': prediction[0] * 100
+        })
+        st.bar_chart(prob_df.set_index('Kelas'))
+    
+    with st.expander("Lihat Detail Langkah Pra-pemrosesan"):
+        st.write("Berikut adalah visualisasi dari setiap langkah pra-pemrosesan yang diterapkan pada gambar:")
+        
+        cols = st.columns(len(processing_steps))
+        for idx, (step_name, step_image) in enumerate(processing_steps.items()):
+            with cols[idx]:
+                st.image(step_image, caption=step_name, use_column_width=True)
+
+else:
+    st.info("Menunggu gambar MRI untuk diunggah...")
