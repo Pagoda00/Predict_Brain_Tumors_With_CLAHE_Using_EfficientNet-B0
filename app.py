@@ -104,8 +104,8 @@ model = load_model()
 st.title("🧠 Deteksi Tumor Otak Berbasis MRI")
 st.markdown(
     """
-    **Author:** Muhammad Kaisar Firdaus  
-    *Program Studi Sains Data, Fakultas Sains, Institut Teknologi Sumatera*
+    🤓**Author:** Muhammad Kaisar Firdaus  
+    🏢*Program Studi Sains Data, Fakultas Sains, Institut Teknologi Sumatera*
     
     Aplikasi ini menggunakan model *Convolutional Neural Network* dengan *transfer learning* **EfficientNet-B0**
     dan menerapkan pra-pemrosesan citra, yaitu *Clip Limit Adaptive Histogram Equalization* (CLAHE) untuk meningkatkan akurasi deteksi.
@@ -128,7 +128,7 @@ if uploaded_file is not None and model is not None:
     with col1:
         st.image(image, caption='Gambar MRI Asli', use_column_width=True)
 
-    with st.spinner("Gambar sedang diproses dan diprediksi..."):
+    with st.spinner("Gambar sedang diproses dan diprediksi...🚀"):
         # Pra-pemrosesan dan prediksi
         processed_image_for_model, processing_steps = preprocess_for_prediction(image_np)
         prediction = model.predict(processed_image_for_model)
