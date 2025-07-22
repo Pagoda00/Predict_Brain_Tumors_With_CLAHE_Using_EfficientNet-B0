@@ -137,7 +137,7 @@ if uploaded_file is not None and model is not None:
         confidence = np.max(prediction) * 100
 
     with col2:
-        st.image(processing_steps['Unsharp Masked'], caption='Gambar Setelah Pra-pemrosesan', use_column_width=True)
+        st.image(processing_steps['Unsharp Masked'], caption='Gambar dengan Pra-pemrosesan CLAHE', use_column_width=True)
 
     st.markdown("---")
     st.header("Hasil Prediksi")
